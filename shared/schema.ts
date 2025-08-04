@@ -15,6 +15,10 @@ export const leads = pgTable("leads", {
   photos: jsonb("photos").$type<string[]>().default([]),
   quote: decimal("quote", { precision: 10, scale: 2 }).notNull(),
   status: text("status").notNull().default("new"),
+  source: text("source").notNull().default("website"), // website, angi, homeadvisor, manual
+  externalId: text("external_id"), // ID from external platform
+  budget: text("budget"), // Customer's stated budget range
+  zipCode: text("zip_code"), // Service area
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -32,6 +36,10 @@ export const insertLeadSchema = createInsertSchema(leads).omit({
   urgency: z.enum(["normal", "rush"]),
   message: z.string().optional(),
   photos: z.array(z.string()).optional(),
+  source: z.enum(["website", "angi", "homeadvisor", "manual"]).default("website"),
+  externalId: z.string().optional(),
+  budget: z.string().optional(),
+  zipCode: z.string().optional(),
 });
 
 export type InsertLead = z.infer<typeof insertLeadSchema>;

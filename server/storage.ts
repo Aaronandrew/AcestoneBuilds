@@ -64,6 +64,11 @@ export class MemStorage implements IStorage {
       createdAt: now,
       updatedAt: now,
       photos: insertLead.photos || [],
+      message: insertLead.message || null,
+      source: insertLead.source || "website",
+      externalId: insertLead.externalId || null,
+      budget: insertLead.budget || null,
+      zipCode: insertLead.zipCode || null,
     };
     this.leads.set(id, lead);
     return lead;

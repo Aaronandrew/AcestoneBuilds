@@ -26,7 +26,12 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
     queryKey: ["/api/leads"],
   });
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading } = useQuery<{
+    totalLeads: number;
+    newLeads: number;
+    inProgress: number;
+    totalRevenue: number;
+  }>({
     queryKey: ["/api/leads/stats"],
   });
 
@@ -83,8 +88,8 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
   };
 
   const filteredLeads = leads.filter((lead) => {
-    const statusMatch = !statusFilter || lead.status === statusFilter;
-    const jobTypeMatch = !jobTypeFilter || lead.jobType === jobTypeFilter;
+    const statusMatch = !statusFilter || statusFilter === 'all' || lead.status === statusFilter;
+    const jobTypeMatch = !jobTypeFilter || jobTypeFilter === 'all' || lead.jobType === jobTypeFilter;
     return statusMatch && jobTypeMatch;
   });
 
@@ -193,7 +198,7 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
                   <SelectValue placeholder="All Statuses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Statuses</SelectItem>
+                  <SelectItem value="all">All Statuses</SelectItem>
                   <SelectItem value="new">New</SelectItem>
                   <SelectItem value="contacted">Contacted</SelectItem>
                   <SelectItem value="in-progress">In Progress</SelectItem>
@@ -206,7 +211,7 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
                   <SelectValue placeholder="All Job Types" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Job Types</SelectItem>
+                  <SelectItem value="all">All Job Types</SelectItem>
                   {Object.entries(JOB_TYPE_LABELS).map(([value, label]) => (
                     <SelectItem key={value} value={value}>
                       {label}
@@ -217,6 +222,38 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
             </div>
 
             <div className="flex space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await apiRequest("POST", "/api/test/angi-lead", {});
+                    queryClient.invalidateQueries({ queryKey: ["/api/leads"] });
+                    queryClient.invalidateQueries({ queryKey: ["/api/leads/stats"] });
+                    toast({ title: "Test Angi lead created successfully" });
+                  } catch (error) {
+                    toast({ title: "Failed to create test lead", variant: "destructive" });
+                  }
+                }}
+              >
+                Test Angi Lead
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await apiRequest("POST", "/api/test/homeadvisor-lead", {});
+                    queryClient.invalidateQueries({ queryKey: ["/api/leads"] });
+                    queryClient.invalidateQueries({ queryKey: ["/api/leads/stats"] });
+                    toast({ title: "Test HomeAdvisor lead created successfully" });
+                  } catch (error) {
+                    toast({ title: "Failed to create test lead", variant: "destructive" });
+                  }
+                }}
+              >
+                Test HA Lead
+              </Button>
               <Button variant="outline" size="sm">
                 <Download className="mr-2 h-4 w-4" />
                 Export
@@ -257,6 +294,7 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
                     <TableHead>Customer</TableHead>
                     <TableHead>Job Type</TableHead>
                     <TableHead>Quote</TableHead>
+                    <TableHead>Source</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Actions</TableHead>
@@ -265,7 +303,7 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 <TableBody>
                   {filteredLeads.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                         No leads found. Adjust your filters or check back later.
                       </TableCell>
                     </TableRow>
@@ -292,6 +330,23 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
                           <div className="text-sm text-muted-foreground">
                             {lead.urgency === "rush" ? "Rush (+15%)" : "Normal"}
                           </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center">
+                            <Badge variant="secondary" className={`
+                              ${lead.source === 'angi' ? 'bg-green-100 text-green-800' : ''}
+                              ${lead.source === 'homeadvisor' ? 'bg-orange-100 text-orange-800' : ''}
+                              ${lead.source === 'website' ? 'bg-blue-100 text-blue-800' : ''}
+                              ${lead.source === 'manual' ? 'bg-purple-100 text-purple-800' : ''}
+                            `}>
+                              {lead.source?.charAt(0).toUpperCase() + lead.source?.slice(1) || 'Website'}
+                            </Badge>
+                          </div>
+                          {lead.externalId && (
+                            <div className="text-xs text-muted-foreground mt-1">
+                              ID: {lead.externalId}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge className={getStatusColor(lead.status)}>

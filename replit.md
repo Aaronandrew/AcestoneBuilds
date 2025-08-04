@@ -38,6 +38,8 @@ Preferred communication style: Simple, everyday language.
 - **Quote Calculation**: Automated pricing based on job type rates, square footage, and rush job multipliers
 - **Lead Management**: Status tracking (new, contacted, in-progress, completed)
 - **Analytics**: Basic statistics including total leads, revenue tracking, and status breakdowns
+- **Multi-Platform Integration**: Webhook endpoints for Angi and HomeAdvisor lead integration
+- **Lead Source Tracking**: Visual indicators for lead origins (website, Angi, HomeAdvisor, manual)
 
 ## External Dependencies
 

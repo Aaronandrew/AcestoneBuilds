@@ -26,22 +26,22 @@ function Header() {
           </div>
           <nav className="hidden md:flex space-x-8">
             <Link href="/">
-              <a className={`${
+              <span className={`cursor-pointer ${
                 location === "/" 
                   ? "text-primary font-medium border-b-2 border-primary pb-1" 
                   : "text-muted-foreground hover:text-primary transition-colors pb-1"
               }`}>
                 Get Quote
-              </a>
+              </span>
             </Link>
             <Link href="/admin">
-              <a className={`${
+              <span className={`cursor-pointer ${
                 location === "/admin" 
                   ? "text-primary font-medium border-b-2 border-primary pb-1" 
                   : "text-muted-foreground hover:text-primary transition-colors pb-1"
               }`}>
                 Admin Portal
-              </a>
+              </span>
             </Link>
           </nav>
         </div>

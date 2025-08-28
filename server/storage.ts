@@ -117,3 +117,17 @@ export class MemStorage implements IStorage {
 }
 
 export const storage = new MemStorage();
+
+// AWS Storage (conditional based on environment)
+let awsStorage: any = null;
+export async function getStorage() {
+  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    if (!awsStorage) {
+      const { AWSStorage } = await import('./aws-storage');
+      awsStorage = new AWSStorage();
+      await awsStorage.initializeTables();
+    }
+    return awsStorage;
+  }
+  return storage;
+}

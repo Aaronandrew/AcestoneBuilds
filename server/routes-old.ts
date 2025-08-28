@@ -125,8 +125,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         leadData.quote = quote.toString();
       }
 
-      const storage = await getStorage();
       const lead = await storage.createLead(leadData);
+      
+      // TODO: Send automatic response email here
       
       res.json({ success: true, leadId: lead.id });
     } catch (error) {
@@ -164,8 +165,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         leadData.quote = quote.toString();
       }
 
-      const storage = await getStorage();
       const lead = await storage.createLead(leadData);
+      
+      // TODO: Send automatic response email here
       
       res.json({ success: true, leadId: lead.id });
     } catch (error) {
@@ -216,7 +218,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const quote = calculateQuote(leadData.jobType, leadData.squareFootage, leadData.urgency);
       leadData.quote = quote.toString();
 
-      const storage = await getStorage();
       const lead = await storage.createLead(leadData);
       res.json({ success: true, message: "Test Angi lead created", lead });
     } catch (error) {
@@ -263,7 +264,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const quote = calculateQuote(leadData.jobType, leadData.squareFootage, leadData.urgency);
       leadData.quote = quote.toString();
 
-      const storage = await getStorage();
       const lead = await storage.createLead(leadData);
       res.json({ success: true, message: "Test HomeAdvisor lead created", lead });
     } catch (error) {
@@ -274,7 +274,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin authentication
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const storage = await getStorage();
       const { username, password } = req.body;
       const user = await storage.getUserByUsername(username);
       

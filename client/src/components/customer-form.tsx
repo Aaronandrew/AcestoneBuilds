@@ -15,6 +15,8 @@ import { insertLeadSchema, type InsertLead } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { QuoteDisplay } from "./quote-display";
 import { calculateQuote, JOB_TYPE_LABELS, URGENCY_LABELS } from "@/lib/pricing";
+import aceImg1 from "@/assets/house.jpeg";
+import aceImg2 from "@/assets/ladder.jpeg";
 
 export function CustomerForm() {
   const [calculatedQuote, setCalculatedQuote] = useState(0);
@@ -96,7 +98,7 @@ export function CustomerForm() {
         <h3 className="text-2xl font-semibold text-foreground mb-6 text-center">Our Work</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <img
-            src="https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300"
+            src={aceImg1}
             alt="Modern kitchen renovation"
             className="rounded-lg shadow-md w-full h-48 object-cover hover:shadow-lg transition-shadow"
           />
@@ -111,7 +113,7 @@ export function CustomerForm() {
             className="rounded-lg shadow-md w-full h-48 object-cover hover:shadow-lg transition-shadow"
           />
           <img
-            src="https://images.unsplash.com/photo-1558618666-fcd25c85cd64?ixlib=rb-4.0.3&auto=format&fit=crop&w=400&h=300"
+            src={aceImg2}
             alt="Hardwood flooring installation"
             className="rounded-lg shadow-md w-full h-48 object-cover hover:shadow-lg transition-shadow"
           />

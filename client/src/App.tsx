@@ -3,25 +3,28 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { HardHat } from "lucide-react";
 import Home from "@/pages/home";
 import Admin from "@/pages/admin";
 import NotFound from "@/pages/not-found";
-
+import aceImg from "@/assets/ace.jpg";
 function Header() {
   const [location] = useLocation();
 
   return (
-    <header className="bg-white shadow-sm border-b border-border">
+    <header className="bg-black shadow-sm border-b border-border">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <HardHat className="text-primary-foreground text-lg" />
+            <div className="w-10 h-10  rounded-lg flex items-center justify-center">
+                        <img 
+                           src={aceImg} 
+                           alt="Hard Hat" 
+                           className="w-12 h-12 object-contain" 
+                        />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-foreground">Acestone Development LLC</h1>
-              <p className="text-sm text-muted-foreground">Professional Contractors</p>
+              <h1 className="text-white text-xl font-bold text-foreground">Acestone Development LLC</h1>
+              <p className="text-white text-sm text-muted-foreground">Professional Contractors</p>
             </div>
           </div>
           <nav className="hidden md:flex space-x-8">
@@ -57,9 +60,14 @@ function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           <div>
             <div className="flex items-center space-x-3 mb-4">
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <HardHat className="text-primary-foreground" />
-              </div>
+               <div className="w-15 h-15 rounded-lg flex items-center justify-center">
+                       <img 
+                           src={aceImg} 
+                           alt="Hard Hat" 
+                           className="w-12 h-12 object-contain" 
+                        />
+                      </div>
+              
               <h3 className="text-lg font-bold">Acestone Development LLC</h3>
             </div>
             <p className="text-neutral-400 text-sm mb-4">
@@ -74,22 +82,22 @@ function Footer() {
               <li>Bathroom Renovation</li>
               <li>Interior Painting</li>
               <li>Flooring Installation</li>
-              <li>Roofing Services</li>
+              <li>Electrical Wiring</li>
             </ul>
           </div>
           
           <div>
             <h4 className="font-semibold mb-4">Contact Info</h4>
             <div className="space-y-2 text-sm text-neutral-400">
-              <div>(555) 123-STONE</div>
-              <div>admin@acestonedev.com</div>
+              <div>(929) 224-9148</div>
+              <div>contact@acestonellc.com</div>
               <div>Licensed & Insured</div>
             </div>
           </div>
         </div>
         
         <div className="border-t border-neutral-800 mt-8 pt-8 text-center text-sm text-neutral-400">
-          <p>&copy; 2024 Acestone Development LLC. All rights reserved.</p>
+          <p>&copy; 2025 Acestone Development LLC. All rights reserved.</p>
         </div>
       </div>
     </footer>

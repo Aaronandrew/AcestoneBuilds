@@ -42,17 +42,17 @@ output "iam_role_arn" {
   value       = aws_iam_role.app_role.arn
 }
 
-output "amplify_app_id" {
-  description = "Amplify application ID"
-  value       = aws_amplify_app.acestone.id
-}
-
-output "amplify_default_domain" {
-  description = "Amplify default domain URL"
-  value       = aws_amplify_app.acestone.default_domain
-}
-
-output "amplify_branch_url" {
-  description = "Amplify branch deployment URL"
-  value       = "https://${aws_amplify_branch.release.branch_name}.${aws_amplify_app.acestone.default_domain}"
-}
+# output "amplify_app_id" {
+#   description = "Amplify application ID"
+#   value       = aws_amplify_app.acestone.id
+# }
+#
+# output "amplify_default_domain" {
+#   description = "Amplify default domain URL"
+#   value       = aws_amplify_app.acestone.default_domain
+# }
+#
+# output "amplify_branch_url" {
+#   description = "Amplify branch deployment URL"
+#   value       = "https://${aws_amplify_branch.release.branch_name}.${aws_amplify_app.acestone.default_domain}"
+# }

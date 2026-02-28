@@ -84,6 +84,12 @@ variable "github_repository" {
   default     = "https://github.com/Aaronandrew/AcestoneBuilds"
 }
 
+variable "github_oauth_token" {
+  description = "GitHub Personal Access Token for Amplify CI/CD"
+  type        = string
+  sensitive   = true
+}
+
 variable "deploy_branch" {
   description = "Git branch for Amplify deployment"
   type        = string

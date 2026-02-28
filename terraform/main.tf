@@ -156,6 +156,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "uploads" {
     id     = "transition-to-ia"
     status = "Enabled"
 
+    filter {}
+
     transition {
       days          = 90
       storage_class = "STANDARD_IA"
@@ -260,7 +262,8 @@ resource "aws_iam_role_policy" "app_policy" {
 # ============================================================
 resource "aws_amplify_app" "acestone" {
   name       = "acestone-development"
-  repository = var.github_repository
+  repository = "https://github.com/Aaronandrew/AcestoneBuilds.git"
+  oauth_token = var.github_oauth_token
 
   build_spec = <<-EOT
     version: 1
@@ -291,13 +294,12 @@ resource "aws_amplify_app" "acestone" {
   EOT
 
   environment_variables = {
-    AWS_REGION             = var.aws_region
+    APP_REGION             = var.aws_region
     DYNAMODB_LEADS_TABLE   = var.dynamodb_leads_table
     DYNAMODB_USERS_TABLE   = var.dynamodb_users_table
     S3_BUCKET_NAME         = var.s3_bucket_name
     SES_FROM_EMAIL         = var.ses_from_email
     NODE_ENV               = "production"
-    AMPLIFY_MONOREPO_APP_ROOT = "."
   }
 
   iam_service_role_arn = aws_iam_role.app_role.arn

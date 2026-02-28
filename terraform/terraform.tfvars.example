@@ -1,0 +1,20 @@
+# ============================================================
+# ACESTONE DEVELOPMENT — TERRAFORM SECRETS TEMPLATE
+# ============================================================
+# Copy this file to terraform.tfvars and fill in your values:
+#   cp terraform.tfvars.example terraform.tfvars
+# ============================================================
+
+aws_access_key_id     = "your-access-key-id"
+aws_secret_access_key = "your-secret-access-key"
+aws_region            = "us-east-1"
+aws_account_id        = "000000000000"
+
+ses_from_email        = "no-reply@yourdomain.com"
+
+dynamodb_leads_table  = "acestone-leads"
+dynamodb_users_table  = "acestone-users"
+s3_bucket_name        = "acestone-uploads"
+
+environment           = "production"
+deploy_branch         = "release-1.0.0"

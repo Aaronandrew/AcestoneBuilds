@@ -10,7 +10,8 @@ aws_secret_access_key = "your-secret-access-key"
 aws_region            = "us-east-1"
 aws_account_id        = "000000000000"
 
-ses_from_email        = "no-reply@yourdomain.com"
+ses_from_email        = "admin@acestonellc.com"
+admin_email            = "admin@acestonellc.com"
 
 dynamodb_leads_table  = "acestone-leads"
 dynamodb_users_table  = "acestone-users"

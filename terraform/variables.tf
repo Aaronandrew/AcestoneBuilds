@@ -73,7 +73,13 @@ variable "cors_allowed_origins" {
 variable "ses_from_email" {
   description = "Verified SES sender email address"
   type        = string
-  default     = "no-reply@acestonedev.com"
+  default     = "admin@acestonellc.com"
+}
+
+variable "admin_email" {
+  description = "Admin email for lead notifications"
+  type        = string
+  default     = "admin@acestonellc.com"
 }
 
 # --- Amplify / GitHub ---

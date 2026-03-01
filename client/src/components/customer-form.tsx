@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -63,7 +63,7 @@ export function CustomerForm() {
   const watchedFields = form.watch(["jobType", "squareFootage", "urgency"]);
 
   // Update quote when relevant fields change
-  useState(() => {
+  useEffect(() => {
     const [jobType, squareFootage, urgency] = watchedFields;
     if (jobType && squareFootage && urgency) {
       const quote = calculateQuote(jobType as any, squareFootage, urgency as any);
@@ -71,13 +71,18 @@ export function CustomerForm() {
     } else {
       setCalculatedQuote(0);
     }
-  });
+  }, [watchedFields]);
 
   const onSubmit = (data: InsertLead) => {
+    console.log("Form submitted with data:", data);
+    console.log("Calculated quote:", calculatedQuote);
+    
     const finalData = {
       ...data,
       quote: calculatedQuote.toString(),
     };
+    
+    console.log("Final data being sent:", finalData);
     createLeadMutation.mutate(finalData);
   };
 
@@ -127,7 +132,21 @@ export function CustomerForm() {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <form 
+              onSubmit={(e) => {
+                console.log("Form submit event triggered");
+                console.log("Form state:", form.formState);
+                console.log("Form errors:", form.formState.errors);
+                form.handleSubmit(onSubmit, (errors) => {
+                  console.log("Validation errors:", errors);
+                  toast({
+                    title: "Validation Error",
+                    description: "Please fill in all required fields correctly.",
+                    variant: "destructive",
+                  });
+                })(e);
+              }} 
+              className="space-y-6">
               {/* Contact Information */}
               <div className="space-y-4">
                 <h4 className="text-lg font-medium text-foreground border-b border-border pb-2">
@@ -171,7 +190,15 @@ export function CustomerForm() {
                     <FormItem>
                       <FormLabel>Phone Number *</FormLabel>
                       <FormControl>
-                        <Input type="tel" placeholder="(555) 123-4567" {...field} />
+                        <Input 
+                          type="tel" 
+                          placeholder="(555) 123-4567" 
+                          {...field}
+                          onChange={(e) => {
+                            const value = e.target.value.replace(/[^0-9]/g, '');
+                            field.onChange(value);
+                          }}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

@@ -1,8 +1,101 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storage";
-import { insertLeadSchema } from "@shared/schema";
+import { insertLeadSchema, type Lead } from "@shared/schema";
 import { z } from "zod";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+
+// --- SES Email Notifications ---
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@acestonellc.com";
+
+let sesClient: SESClient | null = null;
+function getSesClient(): SESClient | null {
+  if (!process.env.SES_FROM_EMAIL) {
+    console.log("[SES] SES_FROM_EMAIL not set — skipping email");
+    return null;
+  }
+  if (!sesClient) {
+    const config: Record<string, any> = { region: process.env.AWS_REGION || "us-east-1" };
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      config.credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      };
+    }
+    sesClient = new SESClient(config);
+  }
+  return sesClient;
+}
+
+async function sendEmail(to: string, subject: string, textBody: string, htmlBody: string) {
+  const client = getSesClient();
+  const SES_FROM_EMAIL = process.env.SES_FROM_EMAIL;
+  if (!client || !SES_FROM_EMAIL) return;
+
+  try {
+    await client.send(new SendEmailCommand({
+      Source: SES_FROM_EMAIL,
+      Destination: { ToAddresses: [to] },
+      Message: {
+        Subject: { Data: subject },
+        Body: {
+          Text: { Data: textBody },
+          Html: { Data: htmlBody },
+        },
+      },
+    }));
+    console.log(`[SES] Email sent to ${to}: ${subject}`);
+  } catch (error: any) {
+    console.error(`[SES] Failed to send email to ${to}:`, error.message);
+  }
+}
+
+async function sendLeadEmails(lead: Lead) {
+  const jobLabel = lead.jobType.charAt(0).toUpperCase() + lead.jobType.slice(1);
+
+  // 1. Email to admin
+  sendEmail(
+    ADMIN_EMAIL,
+    `New Quote Request from ${lead.fullName}`,
+    `New lead submitted:\n\nName: ${lead.fullName}\nEmail: ${lead.email}\nPhone: ${lead.phone}\nJob Type: ${jobLabel}\nSquare Footage: ${lead.squareFootage}\nUrgency: ${lead.urgency}\nEstimated Quote: $${lead.quote}\nMessage: ${lead.message || "(none)"}`,
+    `
+      <div style="font-family: Arial, sans-serif; max-width: 600px;">
+        <h2 style="color: #1a1a1a;">New Quote Request</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr><td style="padding: 8px; font-weight: bold;">Name:</td><td style="padding: 8px;">${lead.fullName}</td></tr>
+          <tr style="background: #f5f5f5;"><td style="padding: 8px; font-weight: bold;">Email:</td><td style="padding: 8px;"><a href="mailto:${lead.email}">${lead.email}</a></td></tr>
+          <tr><td style="padding: 8px; font-weight: bold;">Phone:</td><td style="padding: 8px;"><a href="tel:${lead.phone}">${lead.phone}</a></td></tr>
+          <tr style="background: #f5f5f5;"><td style="padding: 8px; font-weight: bold;">Job Type:</td><td style="padding: 8px;">${jobLabel}</td></tr>
+          <tr><td style="padding: 8px; font-weight: bold;">Square Footage:</td><td style="padding: 8px;">${lead.squareFootage} sq ft</td></tr>
+          <tr style="background: #f5f5f5;"><td style="padding: 8px; font-weight: bold;">Urgency:</td><td style="padding: 8px;">${lead.urgency}</td></tr>
+          <tr><td style="padding: 8px; font-weight: bold;">Estimated Quote:</td><td style="padding: 8px; font-size: 18px; color: #2563eb;"><strong>$${lead.quote}</strong></td></tr>
+          <tr style="background: #f5f5f5;"><td style="padding: 8px; font-weight: bold;">Message:</td><td style="padding: 8px;">${lead.message || "(none)"}</td></tr>
+        </table>
+      </div>
+    `,
+  ).catch(() => {});
+
+  // 2. Email to the customer
+  sendEmail(
+    lead.email,
+    `Your Acestone Development Quote — $${lead.quote}`,
+    `Hi ${lead.fullName},\n\nThank you for requesting a free estimate from Acestone Development!\n\nHere's a summary of your request:\n- Job Type: ${jobLabel}\n- Square Footage: ${lead.squareFootage} sq ft\n- Urgency: ${lead.urgency}\n- Estimated Quote: $${lead.quote}\n\nOur team will review your project and get back to you within 24 hours with a detailed proposal.\n\nBest regards,\nAcestone Development Team`,
+    `
+      <div style="font-family: Arial, sans-serif; max-width: 600px;">
+        <h2 style="color: #1a1a1a;">Thank You, ${lead.fullName}!</h2>
+        <p>We've received your free estimate request. Here's a summary:</p>
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 16px 0;">
+          <p style="margin: 4px 0;"><strong>Job Type:</strong> ${jobLabel}</p>
+          <p style="margin: 4px 0;"><strong>Square Footage:</strong> ${lead.squareFootage} sq ft</p>
+          <p style="margin: 4px 0;"><strong>Urgency:</strong> ${lead.urgency}</p>
+          <p style="margin: 8px 0; font-size: 20px; color: #2563eb;"><strong>Estimated Quote: $${lead.quote}</strong></p>
+        </div>
+        <p>Our team will review your project and get back to you within <strong>24 hours</strong> with a detailed proposal.</p>
+        <p style="color: #666;">Best regards,<br/>Acestone Development Team</p>
+      </div>
+    `,
+  ).catch(() => {});
+}
 
 // Helper functions to map external platform job types to our internal types
 function mapAngiJobType(angiCategory: string): string {
@@ -40,14 +133,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const storage = await getStorage();
       const leadData = insertLeadSchema.parse(req.body);
       const lead = await storage.createLead(leadData);
+      console.log(`[Lead] Created lead ${lead.id} for ${lead.fullName} (storage: ${process.env.AWS_ACCESS_KEY_ID ? 'AWS' : 'MemStorage'})`);
+      sendLeadEmails(lead).catch((err) => console.error("[SES] Email error:", err));
       res.json(lead);
     } catch (error) {
+      console.error("[Lead] Failed to create lead:", error);
       if (error instanceof z.ZodError) {
         res.status(400).json({ error: "Validation error", details: error.errors });
       } else {
         res.status(500).json({ error: "Failed to create lead" });
       }
     }
+  });
+
+  // Debug endpoint to check storage mode
+  app.get("/api/debug/storage", async (req, res) => {
+    const storage = await getStorage();
+    const isAWS = storage.constructor.name === 'AWSStorage';
+    res.json({
+      storage: isAWS ? 'AWS' : 'MemStorage',
+      hasAwsCreds: !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY),
+      region: process.env.AWS_REGION,
+      leadsTable: process.env.DYNAMODB_LEADS_TABLE,
+      usersTable: process.env.DYNAMODB_USERS_TABLE,
+      sesFromEmail: process.env.SES_FROM_EMAIL,
+      adminEmail: process.env.ADMIN_EMAIL,
+    });
   });
 
   // Get all leads

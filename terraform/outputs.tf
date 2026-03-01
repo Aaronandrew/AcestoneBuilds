@@ -32,9 +32,24 @@ output "s3_bucket_arn" {
   value       = aws_s3_bucket.uploads.arn
 }
 
-output "ses_identity_arn" {
-  description = "ARN of the SES email identity"
+output "ses_sender_identity_arn" {
+  description = "ARN of the SES sender email identity"
   value       = aws_ses_email_identity.sender.arn
+}
+
+output "ses_admin_identity_arn" {
+  description = "ARN of the SES admin email identity"
+  value       = aws_ses_email_identity.admin.arn
+}
+
+output "ses_sender_email" {
+  description = "SES sender email address"
+  value       = aws_ses_email_identity.sender.email
+}
+
+output "ses_admin_email" {
+  description = "SES admin email address"
+  value       = aws_ses_email_identity.admin.email
 }
 
 output "iam_role_arn" {

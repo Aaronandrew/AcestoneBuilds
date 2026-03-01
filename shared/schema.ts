@@ -34,6 +34,7 @@ export const insertLeadSchema = createInsertSchema(leads).omit({
   jobType: z.enum(["kitchen", "bathroom", "painting", "flooring", "roofing"]),
   squareFootage: z.number().min(1, "Square footage must be greater than 0"),
   urgency: z.enum(["normal", "rush"]),
+  quote: z.string().optional(), // Quote is calculated on client side
   message: z.string().optional(),
   photos: z.array(z.string()).optional(),
   source: z.enum(["website", "angi", "homeadvisor", "manual"]).default("website"),

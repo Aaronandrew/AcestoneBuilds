@@ -4,11 +4,35 @@ import { getStorage } from "./storage";
 import { insertLeadSchema, type Lead } from "@shared/schema";
 import { z } from "zod";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import multer from "multer";
+import { randomUUID } from "crypto";
 
 // --- SES Email Notifications ---
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@acestonellc.com";
 
 let sesClient: SESClient | null = null;
+let s3Client: S3Client | null = null;
+
+function getS3Client(): S3Client | null {
+  if (!process.env.S3_BUCKET_NAME) {
+    console.log("[S3] S3_BUCKET_NAME not set — skipping uploads");
+    return null;
+  }
+  if (!s3Client) {
+    const config: Record<string, any> = { region: process.env.AWS_REGION || "us-east-1" };
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      config.credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      };
+    }
+    s3Client = new S3Client(config);
+  }
+  return s3Client;
+}
+
 function getSesClient(): SESClient | null {
   if (!process.env.SES_FROM_EMAIL) {
     console.log("[SES] SES_FROM_EMAIL not set — skipping email");
@@ -53,11 +77,52 @@ async function sendEmail(to: string, subject: string, textBody: string, htmlBody
 async function sendLeadEmails(lead: Lead) {
   const jobLabel = lead.jobType.charAt(0).toUpperCase() + lead.jobType.slice(1);
 
+  // Build image gallery for emails using presigned S3 URLs
+  let imageGalleryHtml = '';
+  let imageListText = '';
+  if (lead.photos && lead.photos.length > 0) {
+    const client = getS3Client();
+    const bucketName = process.env.S3_BUCKET_NAME;
+    let emailPhotoUrls: string[] = [];
+
+    if (client && bucketName) {
+      for (const proxyUrl of lead.photos) {
+        try {
+          // Convert proxy URL "/api/photos/leads/xxx" to S3 key "leads/xxx"
+          const key = proxyUrl.replace('/api/photos/', '');
+          const presigned = await getSignedUrl(client, new GetObjectCommand({
+            Bucket: bucketName,
+            Key: key,
+          }), { expiresIn: 604800 }); // 7 days
+          emailPhotoUrls.push(presigned);
+        } catch {
+          emailPhotoUrls.push(proxyUrl);
+        }
+      }
+    } else {
+      emailPhotoUrls = [...lead.photos];
+    }
+
+    imageGalleryHtml = `
+      <div style="margin-top: 20px;">
+        <h3 style="color: #1a1a1a; font-size: 16px; margin-bottom: 10px;">Project Photos (${lead.photos.length})</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
+          ${emailPhotoUrls.map(url => `
+            <a href="${url}" target="_blank" style="display: block;">
+              <img src="${url}" alt="Project photo" style="width: 100%; height: 150px; object-fit: cover; border-radius: 4px; border: 1px solid #e5e5e5;" />
+            </a>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    imageListText = `\n\nProject Photos (${lead.photos.length}):\n${emailPhotoUrls.map((url, i) => `${i + 1}. ${url}`).join('\n')}`;
+  }
+
   // 1. Email to admin
   sendEmail(
     ADMIN_EMAIL,
     `New Quote Request from ${lead.fullName}`,
-    `New lead submitted:\n\nName: ${lead.fullName}\nEmail: ${lead.email}\nPhone: ${lead.phone}\nJob Type: ${jobLabel}\nSquare Footage: ${lead.squareFootage}\nUrgency: ${lead.urgency}\nEstimated Quote: $${lead.quote}\nMessage: ${lead.message || "(none)"}`,
+    `New lead submitted:\n\nName: ${lead.fullName}\nEmail: ${lead.email}\nPhone: ${lead.phone}\nJob Type: ${jobLabel}\nSquare Footage: ${lead.squareFootage}\nUrgency: ${lead.urgency}\nEstimated Quote: $${lead.quote}\nMessage: ${lead.message || "(none)"}${imageListText}`,
     `
       <div style="font-family: Arial, sans-serif; max-width: 600px;">
         <h2 style="color: #1a1a1a;">New Quote Request</h2>
@@ -71,6 +136,7 @@ async function sendLeadEmails(lead: Lead) {
           <tr><td style="padding: 8px; font-weight: bold;">Estimated Quote:</td><td style="padding: 8px; font-size: 18px; color: #2563eb;"><strong>$${lead.quote}</strong></td></tr>
           <tr style="background: #f5f5f5;"><td style="padding: 8px; font-weight: bold;">Message:</td><td style="padding: 8px;">${lead.message || "(none)"}</td></tr>
         </table>
+        ${imageGalleryHtml}
       </div>
     `,
   ).catch(() => {});
@@ -126,7 +192,81 @@ function mapHomeAdvisorJobType(haCategory: string): string {
   return mapping[haCategory?.toLowerCase()] || 'kitchen'; // Default to kitchen
 }
 
+// Configure multer for file uploads (memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+  },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  },
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Upload file to S3
+  app.post("/api/upload", upload.single('file'), async (req, res) => {
+    try {
+      const client = getS3Client();
+      if (!client || !req.file) {
+        return res.status(400).json({ error: "Upload not configured or no file provided" });
+      }
+
+      const bucketName = process.env.S3_BUCKET_NAME!;
+      const fileExtension = req.file.originalname.split('.').pop();
+      const fileName = `leads/${randomUUID()}.${fileExtension}`;
+
+      await client.send(new PutObjectCommand({
+        Bucket: bucketName,
+        Key: fileName,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      }));
+
+      // Generate proxy URL that serves through Express
+      const url = `/api/photos/${fileName}`;
+      
+      console.log(`[S3] Uploaded file: ${fileName}`);
+      res.json({ url });
+    } catch (error: any) {
+      console.error("[S3] Upload error:", error);
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  });
+
+  // Serve photos from S3 through Express proxy
+  app.get("/api/photos/leads/:key", async (req, res) => {
+    try {
+      const client = getS3Client();
+      if (!client) {
+        return res.status(500).json({ error: "S3 not configured" });
+      }
+
+      const bucketName = process.env.S3_BUCKET_NAME!;
+      const key = `leads/${req.params.key}`;
+
+      const response = await client.send(new GetObjectCommand({
+        Bucket: bucketName,
+        Key: key,
+      }));
+
+      if (response.ContentType) {
+        res.setHeader("Content-Type", response.ContentType);
+      }
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+
+      const stream = response.Body as any;
+      stream.pipe(res);
+    } catch (error: any) {
+      console.error("[S3] Photo fetch error:", error.message);
+      res.status(404).json({ error: "Photo not found" });
+    }
+  });
+
   // Create a new lead
   app.post("/api/leads", async (req, res) => {
     try {

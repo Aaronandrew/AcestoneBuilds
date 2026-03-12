@@ -12,6 +12,45 @@ import { randomUUID } from "crypto";
 // --- SES Email Notifications ---
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@acestonellc.com";
 
+// --- n8n Webhook Integration ---
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL; // e.g. https://your-n8n.com/webhook/xxx
+const N8N_WEBHOOK_SECRET = process.env.N8N_WEBHOOK_SECRET || ""; // shared secret for auth
+
+type N8nEvent =
+  | "lead.created"
+  | "crm.stage_changed"
+  | "crm.calendly_sent"
+  | "crm.meeting_booked"
+  | "crm.meeting_completed"
+  | "crm.estimate_sent"
+  | "crm.contract_sent"
+  | "crm.contract_signed"
+  | "crm.job_started"
+  | "crm.job_completed"
+  | "crm.survey_requested"
+  | "crm.closed";
+
+async function fireN8nWebhook(event: N8nEvent, payload: Record<string, any>) {
+  if (!N8N_WEBHOOK_URL) return;
+  try {
+    const res = await fetch(N8N_WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(N8N_WEBHOOK_SECRET ? { "X-Webhook-Secret": N8N_WEBHOOK_SECRET } : {}),
+      },
+      body: JSON.stringify({
+        event,
+        timestamp: new Date().toISOString(),
+        ...payload,
+      }),
+    });
+    console.log(`[n8n] Fired ${event} → ${res.status}`);
+  } catch (error: any) {
+    console.error(`[n8n] Failed to fire ${event}:`, error.message);
+  }
+}
+
 let sesClient: SESClient | null = null;
 let s3Client: S3Client | null = null;
 
@@ -275,6 +314,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const lead = await storage.createLead(leadData);
       console.log(`[Lead] Created lead ${lead.id} for ${lead.fullName} (storage: ${process.env.AWS_ACCESS_KEY_ID ? 'AWS' : 'MemStorage'})`);
       sendLeadEmails(lead).catch((err) => console.error("[SES] Email error:", err));
+
+      // Fire n8n webhook — kicks off the CRM automation workflow
+      fireN8nWebhook("lead.created", {
+        lead: {
+          id: lead.id,
+          fullName: lead.fullName,
+          email: lead.email,
+          phone: lead.phone,
+          jobType: lead.jobType,
+          squareFootage: lead.squareFootage,
+          urgency: lead.urgency,
+          quote: lead.quote,
+          message: lead.message,
+          photos: lead.photos,
+          source: lead.source,
+        },
+      });
+
       res.json(lead);
     } catch (error) {
       console.error("[Lead] Failed to create lead:", error);
@@ -344,6 +401,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(lead);
     } catch (error) {
       res.status(500).json({ error: "Failed to update lead status" });
+    }
+  });
+
+  // Get single lead
+  app.get("/api/leads/:id", async (req, res) => {
+    try {
+      const storage = await getStorage();
+      const lead = await storage.getLead(req.params.id);
+      if (!lead) {
+        res.status(404).json({ error: "Lead not found" });
+        return;
+      }
+      res.json(lead);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch lead" });
+    }
+  });
+
+  // Update lead CRM data
+  app.patch("/api/leads/:id/crm", async (req, res) => {
+    try {
+      const storage = await getStorage();
+      const { id } = req.params;
+      const crmData = req.body;
+      
+      const lead = await storage.updateLeadCrm(id, crmData);
+      if (!lead) {
+        res.status(404).json({ error: "Lead not found" });
+        return;
+      }
+
+      // Fire n8n webhook on CRM stage changes
+      const stage = crmData.crmStatus;
+      const eventMap: Record<string, N8nEvent> = {
+        calendly_sent: "crm.calendly_sent",
+        meeting_booked: "crm.meeting_booked",
+        meeting_completed: "crm.meeting_completed",
+        estimate_sent: "crm.estimate_sent",
+        contract_sent: "crm.contract_sent",
+        contract_signed: "crm.contract_signed",
+        job_in_progress: "crm.job_started",
+        job_completed: "crm.job_completed",
+        pending_survey: "crm.survey_requested",
+        closed: "crm.closed",
+      };
+      const n8nEvent = eventMap[stage] || "crm.stage_changed";
+      fireN8nWebhook(n8nEvent, {
+        lead: { id, fullName: lead.fullName, email: lead.email, phone: lead.phone },
+        crmData,
+      });
+
+      res.json(lead);
+    } catch (error) {
+      console.error("[CRM] Failed to update CRM data:", error);
+      res.status(500).json({ error: "Failed to update CRM data" });
+    }
+  });
+
+  // n8n callback endpoint — n8n calls this to update CRM status
+  app.post("/api/n8n/callback", async (req, res) => {
+    try {
+      // Verify shared secret
+      const secret = req.headers["x-webhook-secret"];
+      if (N8N_WEBHOOK_SECRET && secret !== N8N_WEBHOOK_SECRET) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const { leadId, crmData, action } = req.body;
+      if (!leadId) {
+        res.status(400).json({ error: "leadId is required" });
+        return;
+      }
+
+      const storage = await getStorage();
+      const existingLead = await storage.getLead(leadId);
+      if (!existingLead) {
+        res.status(404).json({ error: "Lead not found" });
+        return;
+      }
+
+      // Merge n8n updates into existing CRM data
+      const existingCrm = existingLead.crmData || { crmStatus: "new_lead", timeline: [] };
+      const mergedCrm = {
+        ...existingCrm,
+        ...crmData,
+        timeline: [
+          ...(existingCrm.timeline || []),
+          {
+            id: randomUUID(),
+            date: new Date().toISOString(),
+            stage: crmData?.crmStatus || existingCrm.crmStatus,
+            event: action || `Updated by n8n automation`,
+            actor: "n8n",
+          },
+        ],
+      };
+
+      const lead = await storage.updateLeadCrm(leadId, mergedCrm);
+      console.log(`[n8n] Callback: updated lead ${leadId} → ${mergedCrm.crmStatus}`);
+      res.json({ success: true, lead });
+    } catch (error: any) {
+      console.error("[n8n] Callback error:", error.message);
+      res.status(500).json({ error: "Failed to process n8n callback" });
     }
   });
 

@@ -1,4 +1,4 @@
-import { type Lead, type InsertLead, type User, type InsertUser } from "@shared/schema";
+import { type Lead, type InsertLead, type User, type InsertUser, type CrmData } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -11,6 +11,7 @@ export interface IStorage {
   getLeads(): Promise<Lead[]>;
   getLead(id: string): Promise<Lead | undefined>;
   updateLeadStatus(id: string, status: string): Promise<Lead | undefined>;
+  updateLeadCrm(id: string, crmData: CrmData): Promise<Lead | undefined>;
   getLeadStats(): Promise<{
     totalLeads: number;
     newLeads: number;
@@ -60,6 +61,7 @@ export class MemStorage implements IStorage {
     const lead: Lead = {
       ...insertLead,
       id,
+      quote: insertLead.quote || "0",
       status: "new",
       createdAt: now,
       updatedAt: now,
@@ -69,6 +71,7 @@ export class MemStorage implements IStorage {
       externalId: insertLead.externalId || null,
       budget: insertLead.budget || null,
       zipCode: insertLead.zipCode || null,
+      crmData: null,
     };
     this.leads.set(id, lead);
     return lead;
@@ -89,6 +92,15 @@ export class MemStorage implements IStorage {
     if (!lead) return undefined;
     
     const updatedLead = { ...lead, status, updatedAt: new Date() };
+    this.leads.set(id, updatedLead);
+    return updatedLead;
+  }
+
+  async updateLeadCrm(id: string, crmData: CrmData): Promise<Lead | undefined> {
+    const lead = this.leads.get(id);
+    if (!lead) return undefined;
+    
+    const updatedLead = { ...lead, crmData, updatedAt: new Date() };
     this.leads.set(id, updatedLead);
     return updatedLead;
   }

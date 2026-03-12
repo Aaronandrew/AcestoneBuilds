@@ -17,7 +17,7 @@ import {
 } from "@aws-sdk/client-ses";
 import { randomUUID } from "crypto";
 import type { IStorage } from "./storage";
-import type { Lead, InsertLead, User, InsertUser } from "@shared/schema";
+import type { Lead, InsertLead, User, InsertUser, CrmData } from "@shared/schema";
 
 export class AWSStorage implements IStorage {
   private dbClient: DynamoDBDocumentClient;
@@ -123,6 +123,7 @@ export class AWSStorage implements IStorage {
       externalId: insertLead.externalId || null,
       budget: insertLead.budget || null,
       zipCode: insertLead.zipCode || null,
+      crmData: null,
     };
 
     await this.dbClient.send(new PutCommand({
@@ -160,6 +161,25 @@ export class AWSStorage implements IStorage {
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: {
           ":status": status,
+          ":updatedAt": now,
+        },
+        ReturnValues: "ALL_NEW",
+      }));
+      return result.Attributes as Lead | undefined;
+    } catch (error) {
+      return undefined;
+    }
+  }
+
+  async updateLeadCrm(id: string, crmData: CrmData): Promise<Lead | undefined> {
+    const now = new Date().toISOString();
+    try {
+      const result = await this.dbClient.send(new UpdateCommand({
+        TableName: this.leadsTable,
+        Key: { id },
+        UpdateExpression: "SET crmData = :crmData, updatedAt = :updatedAt",
+        ExpressionAttributeValues: {
+          ":crmData": crmData,
           ":updatedAt": now,
         },
         ReturnValues: "ALL_NEW",

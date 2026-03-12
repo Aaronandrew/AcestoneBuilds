@@ -12,10 +12,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Plus, Hammer, DollarSign, Eye, Phone, ArrowRightLeft, Download, RefreshCw, LogOut, FileText, Calendar, CheckCircle, Send, Clock, XCircle } from "lucide-react";
+import { Users, Plus, Hammer, DollarSign, Eye, Phone, ArrowRightLeft, Download, RefreshCw, LogOut, FileText, Calendar, CheckCircle, Send, Clock, XCircle, LayoutGrid, Table2 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency, JOB_TYPE_LABELS } from "@/lib/pricing";
+import { CrmPipeline } from "./crm-pipeline";
 import type { Lead } from "@shared/schema";
 
 const STATUS_OPTIONS = [
@@ -189,7 +191,7 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Dashboard Header */}
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-3xl font-bold text-foreground">Admin Dashboard</h2>
           <p className="text-muted-foreground">Manage customer leads and quotes</p>
@@ -200,6 +202,17 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
         </Button>
       </div>
 
+      <Tabs defaultValue="leads" className="space-y-6">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="leads" className="flex items-center gap-2">
+            <Table2 className="h-4 w-4" /> Leads
+          </TabsTrigger>
+          <TabsTrigger value="crm" className="flex items-center gap-2">
+            <LayoutGrid className="h-4 w-4" /> CRM
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="leads" className="space-y-6">
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <Card>
@@ -515,7 +528,7 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
           )}
         </CardContent>
       </Card>
-      {/* Lead Detail Dialog */}
+      {/* Lead Detail Dialog (inside Leads tab) */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -775,6 +788,12 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
           )}
         </DialogContent>
       </Dialog>
+        </TabsContent>
+
+        <TabsContent value="crm">
+          <CrmPipeline />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

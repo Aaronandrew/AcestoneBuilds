@@ -4,11 +4,74 @@ import { getStorage } from "./storage";
 import { insertLeadSchema, type Lead } from "@shared/schema";
 import { z } from "zod";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import multer from "multer";
+import { randomUUID } from "crypto";
 
 // --- SES Email Notifications ---
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@acestonellc.com";
 
+// --- n8n Webhook Integration ---
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL; // e.g. https://your-n8n.com/webhook/xxx
+const N8N_WEBHOOK_SECRET = process.env.N8N_WEBHOOK_SECRET || ""; // shared secret for auth
+
+type N8nEvent =
+  | "lead.created"
+  | "crm.stage_changed"
+  | "crm.calendly_sent"
+  | "crm.meeting_booked"
+  | "crm.meeting_completed"
+  | "crm.estimate_sent"
+  | "crm.contract_sent"
+  | "crm.contract_signed"
+  | "crm.job_started"
+  | "crm.job_completed"
+  | "crm.survey_requested"
+  | "crm.closed";
+
+async function fireN8nWebhook(event: N8nEvent, payload: Record<string, any>) {
+  if (!N8N_WEBHOOK_URL) return;
+  try {
+    const res = await fetch(N8N_WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(N8N_WEBHOOK_SECRET ? { "X-Webhook-Secret": N8N_WEBHOOK_SECRET } : {}),
+      },
+      body: JSON.stringify({
+        event,
+        timestamp: new Date().toISOString(),
+        ...payload,
+      }),
+    });
+    console.log(`[n8n] Fired ${event} → ${res.status}`);
+  } catch (error: any) {
+    console.error(`[n8n] Failed to fire ${event}:`, error.message);
+  }
+}
+
 let sesClient: SESClient | null = null;
+let s3Client: S3Client | null = null;
+
+function getS3Client(): S3Client | null {
+  if (!process.env.S3_BUCKET_NAME) {
+    console.log("[S3] S3_BUCKET_NAME not set — skipping uploads");
+    return null;
+  }
+  if (!s3Client) {
+    const config: Record<string, any> = { region: process.env.AWS_REGION || "us-east-1" };
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      config.credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      };
+    }
+    s3Client = new S3Client(config);
+  }
+  return s3Client;
+}
+
 function getSesClient(): SESClient | null {
   if (!process.env.SES_FROM_EMAIL) {
     console.log("[SES] SES_FROM_EMAIL not set — skipping email");
@@ -53,11 +116,52 @@ async function sendEmail(to: string, subject: string, textBody: string, htmlBody
 async function sendLeadEmails(lead: Lead) {
   const jobLabel = lead.jobType.charAt(0).toUpperCase() + lead.jobType.slice(1);
 
+  // Build image gallery for emails using presigned S3 URLs
+  let imageGalleryHtml = '';
+  let imageListText = '';
+  if (lead.photos && lead.photos.length > 0) {
+    const client = getS3Client();
+    const bucketName = process.env.S3_BUCKET_NAME;
+    let emailPhotoUrls: string[] = [];
+
+    if (client && bucketName) {
+      for (const proxyUrl of lead.photos) {
+        try {
+          // Convert proxy URL "/api/photos/leads/xxx" to S3 key "leads/xxx"
+          const key = proxyUrl.replace('/api/photos/', '');
+          const presigned = await getSignedUrl(client, new GetObjectCommand({
+            Bucket: bucketName,
+            Key: key,
+          }), { expiresIn: 604800 }); // 7 days
+          emailPhotoUrls.push(presigned);
+        } catch {
+          emailPhotoUrls.push(proxyUrl);
+        }
+      }
+    } else {
+      emailPhotoUrls = [...lead.photos];
+    }
+
+    imageGalleryHtml = `
+      <div style="margin-top: 20px;">
+        <h3 style="color: #1a1a1a; font-size: 16px; margin-bottom: 10px;">Project Photos (${lead.photos.length})</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
+          ${emailPhotoUrls.map(url => `
+            <a href="${url}" target="_blank" style="display: block;">
+              <img src="${url}" alt="Project photo" style="width: 100%; height: 150px; object-fit: cover; border-radius: 4px; border: 1px solid #e5e5e5;" />
+            </a>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    imageListText = `\n\nProject Photos (${lead.photos.length}):\n${emailPhotoUrls.map((url, i) => `${i + 1}. ${url}`).join('\n')}`;
+  }
+
   // 1. Email to admin
   sendEmail(
     ADMIN_EMAIL,
     `New Quote Request from ${lead.fullName}`,
-    `New lead submitted:\n\nName: ${lead.fullName}\nEmail: ${lead.email}\nPhone: ${lead.phone}\nJob Type: ${jobLabel}\nSquare Footage: ${lead.squareFootage}\nUrgency: ${lead.urgency}\nEstimated Quote: $${lead.quote}\nMessage: ${lead.message || "(none)"}`,
+    `New lead submitted:\n\nName: ${lead.fullName}\nEmail: ${lead.email}\nPhone: ${lead.phone}\nJob Type: ${jobLabel}\nSquare Footage: ${lead.squareFootage}\nUrgency: ${lead.urgency}\nEstimated Quote: $${lead.quote}\nMessage: ${lead.message || "(none)"}${imageListText}`,
     `
       <div style="font-family: Arial, sans-serif; max-width: 600px;">
         <h2 style="color: #1a1a1a;">New Quote Request</h2>
@@ -71,6 +175,7 @@ async function sendLeadEmails(lead: Lead) {
           <tr><td style="padding: 8px; font-weight: bold;">Estimated Quote:</td><td style="padding: 8px; font-size: 18px; color: #2563eb;"><strong>$${lead.quote}</strong></td></tr>
           <tr style="background: #f5f5f5;"><td style="padding: 8px; font-weight: bold;">Message:</td><td style="padding: 8px;">${lead.message || "(none)"}</td></tr>
         </table>
+        ${imageGalleryHtml}
       </div>
     `,
   ).catch(() => {});
@@ -126,7 +231,81 @@ function mapHomeAdvisorJobType(haCategory: string): string {
   return mapping[haCategory?.toLowerCase()] || 'kitchen'; // Default to kitchen
 }
 
+// Configure multer for file uploads (memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+  },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  },
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Upload file to S3
+  app.post("/api/upload", upload.single('file'), async (req, res) => {
+    try {
+      const client = getS3Client();
+      if (!client || !req.file) {
+        return res.status(400).json({ error: "Upload not configured or no file provided" });
+      }
+
+      const bucketName = process.env.S3_BUCKET_NAME!;
+      const fileExtension = req.file.originalname.split('.').pop();
+      const fileName = `leads/${randomUUID()}.${fileExtension}`;
+
+      await client.send(new PutObjectCommand({
+        Bucket: bucketName,
+        Key: fileName,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      }));
+
+      // Generate proxy URL that serves through Express
+      const url = `/api/photos/${fileName}`;
+      
+      console.log(`[S3] Uploaded file: ${fileName}`);
+      res.json({ url });
+    } catch (error: any) {
+      console.error("[S3] Upload error:", error);
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  });
+
+  // Serve photos from S3 through Express proxy
+  app.get("/api/photos/leads/:key", async (req, res) => {
+    try {
+      const client = getS3Client();
+      if (!client) {
+        return res.status(500).json({ error: "S3 not configured" });
+      }
+
+      const bucketName = process.env.S3_BUCKET_NAME!;
+      const key = `leads/${req.params.key}`;
+
+      const response = await client.send(new GetObjectCommand({
+        Bucket: bucketName,
+        Key: key,
+      }));
+
+      if (response.ContentType) {
+        res.setHeader("Content-Type", response.ContentType);
+      }
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+
+      const stream = response.Body as any;
+      stream.pipe(res);
+    } catch (error: any) {
+      console.error("[S3] Photo fetch error:", error.message);
+      res.status(404).json({ error: "Photo not found" });
+    }
+  });
+
   // Create a new lead
   app.post("/api/leads", async (req, res) => {
     try {
@@ -135,6 +314,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const lead = await storage.createLead(leadData);
       console.log(`[Lead] Created lead ${lead.id} for ${lead.fullName} (storage: ${process.env.AWS_ACCESS_KEY_ID ? 'AWS' : 'MemStorage'})`);
       sendLeadEmails(lead).catch((err) => console.error("[SES] Email error:", err));
+
+      // Fire n8n webhook — kicks off the CRM automation workflow
+      fireN8nWebhook("lead.created", {
+        lead: {
+          id: lead.id,
+          fullName: lead.fullName,
+          email: lead.email,
+          phone: lead.phone,
+          jobType: lead.jobType,
+          squareFootage: lead.squareFootage,
+          urgency: lead.urgency,
+          quote: lead.quote,
+          message: lead.message,
+          photos: lead.photos,
+          source: lead.source,
+        },
+      });
+
       res.json(lead);
     } catch (error) {
       console.error("[Lead] Failed to create lead:", error);
@@ -204,6 +401,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(lead);
     } catch (error) {
       res.status(500).json({ error: "Failed to update lead status" });
+    }
+  });
+
+  // Get single lead
+  app.get("/api/leads/:id", async (req, res) => {
+    try {
+      const storage = await getStorage();
+      const lead = await storage.getLead(req.params.id);
+      if (!lead) {
+        res.status(404).json({ error: "Lead not found" });
+        return;
+      }
+      res.json(lead);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch lead" });
+    }
+  });
+
+  // Update lead CRM data
+  app.patch("/api/leads/:id/crm", async (req, res) => {
+    try {
+      const storage = await getStorage();
+      const { id } = req.params;
+      const crmData = req.body;
+      
+      const lead = await storage.updateLeadCrm(id, crmData);
+      if (!lead) {
+        res.status(404).json({ error: "Lead not found" });
+        return;
+      }
+
+      // Fire n8n webhook on CRM stage changes
+      const stage = crmData.crmStatus;
+      const eventMap: Record<string, N8nEvent> = {
+        calendly_sent: "crm.calendly_sent",
+        meeting_booked: "crm.meeting_booked",
+        meeting_completed: "crm.meeting_completed",
+        estimate_sent: "crm.estimate_sent",
+        contract_sent: "crm.contract_sent",
+        contract_signed: "crm.contract_signed",
+        job_in_progress: "crm.job_started",
+        job_completed: "crm.job_completed",
+        pending_survey: "crm.survey_requested",
+        closed: "crm.closed",
+      };
+      const n8nEvent = eventMap[stage] || "crm.stage_changed";
+      fireN8nWebhook(n8nEvent, {
+        lead: { id, fullName: lead.fullName, email: lead.email, phone: lead.phone },
+        crmData,
+      });
+
+      res.json(lead);
+    } catch (error) {
+      console.error("[CRM] Failed to update CRM data:", error);
+      res.status(500).json({ error: "Failed to update CRM data" });
+    }
+  });
+
+  // n8n callback endpoint — n8n calls this to update CRM status
+  app.post("/api/n8n/callback", async (req, res) => {
+    try {
+      // Verify shared secret
+      const secret = req.headers["x-webhook-secret"];
+      if (N8N_WEBHOOK_SECRET && secret !== N8N_WEBHOOK_SECRET) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const { leadId, crmData, action } = req.body;
+      if (!leadId) {
+        res.status(400).json({ error: "leadId is required" });
+        return;
+      }
+
+      const storage = await getStorage();
+      const existingLead = await storage.getLead(leadId);
+      if (!existingLead) {
+        res.status(404).json({ error: "Lead not found" });
+        return;
+      }
+
+      // Merge n8n updates into existing CRM data
+      const existingCrm = existingLead.crmData || { crmStatus: "new_lead", timeline: [] };
+      const mergedCrm = {
+        ...existingCrm,
+        ...crmData,
+        timeline: [
+          ...(existingCrm.timeline || []),
+          {
+            id: randomUUID(),
+            date: new Date().toISOString(),
+            stage: crmData?.crmStatus || existingCrm.crmStatus,
+            event: action || `Updated by n8n automation`,
+            actor: "n8n",
+          },
+        ],
+      };
+
+      const lead = await storage.updateLeadCrm(leadId, mergedCrm);
+      console.log(`[n8n] Callback: updated lead ${leadId} → ${mergedCrm.crmStatus}`);
+      res.json({ success: true, lead });
+    } catch (error: any) {
+      console.error("[n8n] Callback error:", error.message);
+      res.status(500).json({ error: "Failed to process n8n callback" });
     }
   });
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -20,6 +20,8 @@ import aceImg2 from "@/assets/ladder.jpeg";
 
 export function CustomerForm() {
   const [calculatedQuote, setCalculatedQuote] = useState(0);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -49,6 +51,7 @@ export function CustomerForm() {
       });
       form.reset();
       setCalculatedQuote(0);
+      setUploadedFiles([]);
       queryClient.invalidateQueries({ queryKey: ["/api/leads"] });
     },
     onError: (error: any) => {
@@ -73,17 +76,112 @@ export function CustomerForm() {
     }
   }, [watchedFields]);
 
-  const onSubmit = (data: InsertLead) => {
+  const onSubmit = async (data: InsertLead) => {
     console.log("Form submitted with data:", data);
     console.log("Calculated quote:", calculatedQuote);
+    
+    let photoUrls: string[] = [];
+    
+    // Upload files to S3 if any
+    if (uploadedFiles.length > 0) {
+      setUploading(true);
+      try {
+        for (const file of uploadedFiles) {
+          const formData = new FormData();
+          formData.append('file', file);
+          
+          const uploadRes = await fetch("/api/upload", {
+            method: "POST",
+            body: formData,
+            credentials: "include",
+          });
+          if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.statusText}`);
+          const { url } = await uploadRes.json();
+          photoUrls.push(url);
+        }
+      } catch (error) {
+        console.error("Upload error:", error);
+        toast({
+          title: "Upload Failed",
+          description: "Some images failed to upload. Submitting form anyway.",
+          variant: "destructive",
+        });
+      } finally {
+        setUploading(false);
+      }
+    }
     
     const finalData = {
       ...data,
       quote: calculatedQuote.toString(),
+      photos: photoUrls,
     };
     
     console.log("Final data being sent:", finalData);
     createLeadMutation.mutate(finalData);
+  };
+
+  const fillDebugData = () => {
+    const debugValues: InsertLead = {
+      fullName: "Chad Watson",
+      email: "chad@example.com",
+      phone: "9193828181",
+      jobType: "kitchen",
+      squareFootage: 650,
+      urgency: "rush",
+      message: "Kitchen remodel with new cabinets and flooring.",
+      photos: [],
+      source: "website",
+    } as InsertLead;
+
+    form.reset(debugValues);
+    const quote = calculateQuote(debugValues.jobType as any, debugValues.squareFootage!, debugValues.urgency as any);
+    setCalculatedQuote(quote);
+    setUploadedFiles([]);
+  };
+
+  const formatPhoneNumber = (value: string) => {
+    const cleaned = value.replace(/\D/g, '');
+    const match = cleaned.match(/^(\d{0,3})(\d{0,3})(\d{0,4})$/);
+    if (!match) return value;
+    
+    const [, area, prefix, line] = match;
+    if (line) {
+      return `(${area}) ${prefix}-${line}`;
+    } else if (prefix) {
+      return `(${area}) ${prefix}`;
+    } else if (area) {
+      return `(${area}`;
+    }
+    return '';
+  };
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const validFiles = files.filter(file => {
+      const isImage = file.type.startsWith('image/');
+      const isUnder5MB = file.size <= 5 * 1024 * 1024;
+      if (!isImage) {
+        toast({
+          title: "Invalid File",
+          description: `${file.name} is not an image file`,
+          variant: "destructive",
+        });
+      }
+      if (!isUnder5MB) {
+        toast({
+          title: "File Too Large",
+          description: `${file.name} is larger than 5MB`,
+          variant: "destructive",
+        });
+      }
+      return isImage && isUnder5MB;
+    });
+    setUploadedFiles(prev => [...prev, ...validFiles]);
+  }, [toast]);
+
+  const removeFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -127,8 +225,13 @@ export function CustomerForm() {
 
       {/* Quote Form */}
       <Card className="shadow-lg">
-        <CardHeader>
+        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <CardTitle className="text-2xl font-semibold">Get Your Free Estimate</CardTitle>
+          {import.meta.env.DEV && (
+            <Button type="button" variant="outline" size="sm" onClick={fillDebugData}>
+              Auto-fill Debug Data
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -193,10 +296,10 @@ export function CustomerForm() {
                         <Input 
                           type="tel" 
                           placeholder="(555) 123-4567" 
-                          {...field}
+                          value={formatPhoneNumber(field.value || '')}
                           onChange={(e) => {
-                            const value = e.target.value.replace(/[^0-9]/g, '');
-                            field.onChange(value);
+                            const cleaned = e.target.value.replace(/\D/g, '');
+                            field.onChange(cleaned);
                           }}
                         />
                       </FormControl>
@@ -219,7 +322,7 @@ export function CustomerForm() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Job Type *</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value ?? ""}>
                           <FormControl>
                             <SelectTrigger>
                               <SelectValue placeholder="Select job type" />
@@ -245,12 +348,16 @@ export function CustomerForm() {
                       <FormItem>
                         <FormLabel>Square Footage *</FormLabel>
                         <FormControl>
-                          <Input 
-                            type="number" 
-                            placeholder="Enter square footage" 
-                            {...field}
-                            onChange={(e) => field.onChange(parseInt(e.target.value) || undefined)}
-                          />
+                          <div className="relative">
+                            <Input 
+                              type="number" 
+                              placeholder="Enter square footage" 
+                              {...field}
+                              onChange={(e) => field.onChange(parseInt(e.target.value) || undefined)}
+                              className="pr-16"
+                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">sq ft</span>
+                          </div>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -264,7 +371,7 @@ export function CustomerForm() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Job Urgency *</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select urgency" />
@@ -314,10 +421,37 @@ export function CustomerForm() {
                   <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary transition-colors mt-2">
                     <Upload className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
                     <p className="text-muted-foreground mb-2">Drag and drop files here, or click to browse</p>
-                    <Button type="button" variant="outline" size="sm">
+                    <input
+                      type="file"
+                      id="file-upload"
+                      multiple
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
                       Choose Files
                     </Button>
+                    <p className="text-xs text-muted-foreground mt-2">Max 5MB per image</p>
                   </div>
+                  {uploadedFiles.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      {uploadedFiles.map((file, index) => (
+                        <div key={index} className="flex items-center justify-between p-2 bg-muted rounded">
+                          <span className="text-sm truncate flex-1">{file.name}</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeFile(index)}
+                            className="ml-2"
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -336,10 +470,13 @@ export function CustomerForm() {
                 <Button 
                   type="submit" 
                   className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-4 px-6 h-auto"
-                  disabled={createLeadMutation.isPending}
+                  disabled={createLeadMutation.isPending || uploading}
                 >
-                  {createLeadMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {(createLeadMutation.isPending || uploading) ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {uploading ? 'Uploading Images...' : 'Submitting...'}
+                    </>
                   ) : (
                     <NotebookPen className="mr-2 h-4 w-4" />
                   )}

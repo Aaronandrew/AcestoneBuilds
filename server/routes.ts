@@ -508,6 +508,213 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // --- Calendly webhook: customer booked a meeting ---
+  app.post("/api/webhooks/calendly", async (req, res) => {
+    try {
+      const payload = req.body;
+
+      // Calendly sends event type "invitee.created" when someone books
+      // The leadId should be passed as UTM parameter or tracking field in the Calendly link
+      // e.g. https://calendly.com/acestone-development?utm_content=LEAD_ID
+      const event = payload.event || payload.payload?.event;
+      const invitee = payload.payload?.invitee || payload.invitee || {};
+      const scheduledEvent = payload.payload?.scheduled_event || payload.scheduled_event || {};
+
+      // Extract lead ID from tracking UTM, questions, or lookup by email
+      let leadId = payload.payload?.tracking?.utm_content
+        || invitee.tracking?.utm_content
+        || payload.leadId;
+
+      const customerEmail = invitee.email || payload.email;
+      const meetingDate = scheduledEvent.start_time || scheduledEvent.start || payload.start_time;
+      const customerName = invitee.name || payload.name;
+
+      // If no leadId from tracking, try to find lead by email
+      if (!leadId && customerEmail) {
+        const storage = await getStorage();
+        const allLeads = await storage.getLeads();
+        const match = allLeads.find(
+          (l: any) => l.email.toLowerCase() === customerEmail.toLowerCase()
+            && l.crmData?.crmStatus === "calendly_sent"
+        );
+        if (match) leadId = match.id;
+      }
+
+      if (!leadId) {
+        console.log("[Calendly] No matching lead found for booking:", customerEmail);
+        res.json({ received: true, matched: false });
+        return;
+      }
+
+      const storage = await getStorage();
+      const lead = await storage.getLead(leadId);
+      if (!lead) {
+        res.json({ received: true, matched: false, reason: "Lead not found" });
+        return;
+      }
+
+      // Update CRM to meeting_booked
+      const existingCrm = lead.crmData || { crmStatus: "new_lead", timeline: [] };
+      const updatedCrm = {
+        ...existingCrm,
+        crmStatus: "meeting_booked" as const,
+        meetingDate: meetingDate || new Date().toISOString(),
+        meetingBookedAt: new Date().toISOString(),
+        timeline: [
+          ...(existingCrm.timeline || []),
+          {
+            id: randomUUID(),
+            date: new Date().toISOString(),
+            stage: "meeting_booked" as const,
+            event: `Meeting booked by ${customerName || customerEmail} via Calendly`,
+            actor: "customer",
+          },
+        ],
+      };
+
+      await storage.updateLeadCrm(leadId, updatedCrm);
+      console.log(`[Calendly] Meeting booked for lead ${leadId} at ${meetingDate}`);
+
+      fireN8nWebhook("crm.meeting_booked", {
+        lead: { id: leadId, fullName: lead.fullName, email: lead.email, phone: lead.phone },
+        crmData: updatedCrm,
+      });
+
+      res.json({ received: true, matched: true, leadId });
+    } catch (error: any) {
+      console.error("[Calendly] Webhook error:", error.message);
+      res.status(500).json({ error: "Failed to process Calendly webhook" });
+    }
+  });
+
+  // --- Contract signed webhook: e-signature platform callback ---
+  app.post("/api/webhooks/contract-signed", async (req, res) => {
+    try {
+      const { leadId, signerName, signedAt, documentUrl } = req.body;
+
+      if (!leadId) {
+        res.status(400).json({ error: "leadId is required" });
+        return;
+      }
+
+      const storage = await getStorage();
+      const lead = await storage.getLead(leadId);
+      if (!lead) {
+        res.status(404).json({ error: "Lead not found" });
+        return;
+      }
+
+      const existingCrm = lead.crmData || { crmStatus: "new_lead", timeline: [] };
+      const updatedCrm = {
+        ...existingCrm,
+        crmStatus: "contract_signed" as const,
+        contractSignedAt: signedAt || new Date().toISOString(),
+        timeline: [
+          ...(existingCrm.timeline || []),
+          {
+            id: randomUUID(),
+            date: new Date().toISOString(),
+            stage: "contract_signed" as const,
+            event: `Contract signed by ${signerName || lead.fullName}${documentUrl ? ` — doc: ${documentUrl}` : ""}`,
+            actor: "customer",
+          },
+        ],
+      };
+
+      await storage.updateLeadCrm(leadId, updatedCrm);
+      console.log(`[Contract] Signed for lead ${leadId}`);
+
+      fireN8nWebhook("crm.contract_signed", {
+        lead: { id: leadId, fullName: lead.fullName, email: lead.email, phone: lead.phone },
+        crmData: updatedCrm,
+      });
+
+      res.json({ success: true, leadId });
+    } catch (error: any) {
+      console.error("[Contract] Webhook error:", error.message);
+      res.status(500).json({ error: "Failed to process contract webhook" });
+    }
+  });
+
+  // --- Public survey submission: customer fills out satisfaction survey ---
+  app.get("/api/survey/:leadId", async (req, res) => {
+    try {
+      const storage = await getStorage();
+      const lead = await storage.getLead(req.params.leadId);
+      if (!lead) {
+        res.status(404).json({ error: "Survey not found" });
+        return;
+      }
+      // Return minimal lead info for the survey form (no PII beyond name)
+      res.json({
+        leadId: lead.id,
+        customerName: lead.fullName.split(" ")[0], // first name only
+        jobType: lead.jobType,
+        alreadyCompleted: lead.crmData?.crmStatus === "closed",
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to load survey" });
+    }
+  });
+
+  app.post("/api/survey/:leadId", async (req, res) => {
+    try {
+      const { rating, feedback } = req.body;
+      const leadId = req.params.leadId;
+
+      if (!rating || rating < 1 || rating > 5) {
+        res.status(400).json({ error: "Rating must be between 1 and 5" });
+        return;
+      }
+
+      const storage = await getStorage();
+      const lead = await storage.getLead(leadId);
+      if (!lead) {
+        res.status(404).json({ error: "Lead not found" });
+        return;
+      }
+
+      if (lead.crmData?.crmStatus === "closed") {
+        res.status(400).json({ error: "Survey already completed" });
+        return;
+      }
+
+      const existingCrm = lead.crmData || { crmStatus: "new_lead", timeline: [] };
+      const updatedCrm = {
+        ...existingCrm,
+        crmStatus: "closed" as const,
+        surveyRating: rating,
+        surveyFeedback: feedback || "",
+        surveyCompletedAt: new Date().toISOString(),
+        timeline: [
+          ...(existingCrm.timeline || []),
+          {
+            id: randomUUID(),
+            date: new Date().toISOString(),
+            stage: "closed" as const,
+            event: `Customer submitted survey: ${rating}/5 stars${feedback ? " with feedback" : ""}`,
+            actor: "customer",
+          },
+        ],
+      };
+
+      await storage.updateLeadCrm(leadId, updatedCrm);
+      console.log(`[Survey] Lead ${leadId} rated ${rating}/5`);
+
+      fireN8nWebhook("crm.closed", {
+        lead: { id: leadId, fullName: lead.fullName, email: lead.email },
+        crmData: updatedCrm,
+        surveyRating: rating,
+        surveyFeedback: feedback,
+      });
+
+      res.json({ success: true, message: "Thank you for your feedback!" });
+    } catch (error: any) {
+      console.error("[Survey] Submission error:", error.message);
+      res.status(500).json({ error: "Failed to submit survey" });
+    }
+  });
+
   // Webhook endpoint for Angi leads
   app.post("/api/webhooks/angi", async (req, res) => {
     try {

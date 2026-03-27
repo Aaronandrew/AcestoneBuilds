@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/home";
 import Admin from "@/pages/admin";
+import Survey from "@/pages/survey";
 import NotFound from "@/pages/not-found";
 import aceImg from "@/assets/ace.jpg";
 function Header() {
@@ -109,6 +110,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/admin" component={Admin} />
+      <Route path="/survey/:leadId" component={Survey} />
       <Route component={NotFound} />
     </Switch>
   );

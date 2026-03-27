@@ -1,5 +1,8 @@
 import { type Lead, type InsertLead, type User, type InsertUser, type CrmData } from "@shared/schema";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
+
+const BCRYPT_ROUNDS = 12;
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -27,13 +30,18 @@ export class MemStorage implements IStorage {
   constructor() {
     this.users = new Map();
     this.leads = new Map();
-    
-    // Create default admin user
+
+    // Create default admin user with hashed password
+    this._seedAdmin();
+  }
+
+  private async _seedAdmin() {
     const adminId = randomUUID();
+    const hashedPassword = await bcrypt.hash("admin123", BCRYPT_ROUNDS);
     const adminUser: User = {
       id: adminId,
       username: "admin",
-      password: "admin123" // In production, this should be hashed
+      password: hashedPassword,
     };
     this.users.set(adminId, adminUser);
   }
@@ -50,7 +58,8 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
+    const hashedPassword = await bcrypt.hash(insertUser.password, BCRYPT_ROUNDS);
+    const user: User = { ...insertUser, id, password: hashedPassword };
     this.users.set(id, user);
     return user;
   }

@@ -16,8 +16,11 @@ import {
   SESClient
 } from "@aws-sdk/client-ses";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 import type { IStorage } from "./storage";
 import type { Lead, InsertLead, User, InsertUser, CrmData } from "@shared/schema";
+
+const BCRYPT_ROUNDS = 12;
 
 export class AWSStorage implements IStorage {
   private dbClient: DynamoDBDocumentClient;
@@ -70,7 +73,7 @@ export class AWSStorage implements IStorage {
       if (!existing) {
         console.log("[AWS] Seeding default admin user...");
         await this.createUser({ username: "admin", password: "admin123" });
-        console.log("[AWS] Default admin user created (admin / admin123)");
+        console.log("[AWS] Default admin user created");
       } else {
         console.log("[AWS] Admin user already exists");
       }
@@ -99,7 +102,8 @@ export class AWSStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
+    const hashedPassword = await bcrypt.hash(insertUser.password, BCRYPT_ROUNDS);
+    const user: User = { ...insertUser, id, password: hashedPassword };
     await this.dbClient.send(new PutCommand({
       TableName: this.usersTable,
       Item: user,

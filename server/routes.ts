@@ -1,8 +1,26 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { getStorage } from "./storage";
 import { insertLeadSchema, type Lead } from "@shared/schema";
 import { z } from "zod";
+import bcrypt from "bcrypt";
+
+// Augment express-session with our user data
+declare module "express-session" {
+  interface SessionData {
+    userId: string;
+    username: string;
+  }
+}
+
+// Auth middleware — protects admin-only routes
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.session.userId) {
+    next();
+  } else {
+    res.status(401).json({ error: "Authentication required" });
+  }
+}
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -343,8 +361,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Debug endpoint to check storage mode
-  app.get("/api/debug/storage", async (req, res) => {
+  // Debug endpoint to check storage mode (admin only)
+  app.get("/api/debug/storage", requireAuth, async (req, res) => {
     const storage = await getStorage();
     const isAWS = storage.constructor.name === 'AWSStorage';
     res.json({
@@ -358,8 +376,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // Get all leads
-  app.get("/api/leads", async (req, res) => {
+  // Get all leads (admin only)
+  app.get("/api/leads", requireAuth, async (req, res) => {
     try {
       const storage = await getStorage();
       const leads = await storage.getLeads();
@@ -369,8 +387,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get lead stats
-  app.get("/api/leads/stats", async (req, res) => {
+  // Get lead stats (admin only)
+  app.get("/api/leads/stats", requireAuth, async (req, res) => {
     try {
       const storage = await getStorage();
       const stats = await storage.getLeadStats();
@@ -380,8 +398,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Update lead status
-  app.patch("/api/leads/:id/status", async (req, res) => {
+  // Update lead status (admin only)
+  app.patch("/api/leads/:id/status", requireAuth, async (req, res) => {
     try {
       const storage = await getStorage();
       const { id } = req.params;
@@ -404,8 +422,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get single lead
-  app.get("/api/leads/:id", async (req, res) => {
+  // Get single lead (admin only)
+  app.get("/api/leads/:id", requireAuth, async (req, res) => {
     try {
       const storage = await getStorage();
       const lead = await storage.getLead(req.params.id);
@@ -419,8 +437,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Update lead CRM data
-  app.patch("/api/leads/:id/crm", async (req, res) => {
+  // Update lead CRM data (admin only)
+  app.patch("/api/leads/:id/crm", requireAuth, async (req, res) => {
     try {
       const storage = await getStorage();
       const { id } = req.params;
@@ -586,8 +604,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Test webhook endpoints (for development/testing)
-  app.post("/api/test/angi-lead", async (req, res) => {
+  // Test webhook endpoints (admin only, for development/testing)
+  app.post("/api/test/angi-lead", requireAuth, async (req, res) => {
     try {
       const sampleAngiData = {
         leadId: "test_angi_" + Date.now(),
@@ -636,7 +654,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/test/homeadvisor-lead", async (req, res) => {
+  app.post("/api/test/homeadvisor-lead", requireAuth, async (req, res) => {
     try {
       const sampleHAData = {
         requestId: "test_ha_" + Date.now(),
@@ -690,15 +708,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { username, password } = req.body;
       const user = await storage.getUserByUsername(username);
       
-      if (!user || user.password !== password) {
+      if (!user) {
         res.status(401).json({ error: "Invalid credentials" });
         return;
       }
-      
+
+      // Support bcrypt hashed passwords and legacy plaintext migration
+      let passwordValid = false;
+      if (user.password.startsWith("$2b$") || user.password.startsWith("$2a$")) {
+        passwordValid = await bcrypt.compare(password, user.password);
+      } else {
+        // Legacy plaintext — compare and migrate to bcrypt
+        passwordValid = user.password === password;
+        if (passwordValid) {
+          const { hash } = await import("bcrypt");
+          const hashed = await hash(password, 12);
+          const storage = await getStorage();
+          // Update password in-place if storage supports it
+          try {
+            const updatedUser = { ...user, password: hashed };
+            if ((storage as any).users instanceof Map) {
+              (storage as any).users.set(user.id, updatedUser);
+            }
+          } catch { /* migration is best-effort */ }
+          console.log(`[Auth] Migrated plaintext password to bcrypt for user: ${user.username}`);
+        }
+      }
+
+      if (!passwordValid) {
+        res.status(401).json({ error: "Invalid credentials" });
+        return;
+      }
+
+      // Set session
+      req.session.userId = user.id;
+      req.session.username = user.username;
+
       res.json({ message: "Authentication successful", user: { id: user.id, username: user.username } });
     } catch (error) {
       res.status(500).json({ error: "Authentication failed" });
     }
+  });
+
+  // Session check endpoint
+  app.get("/api/auth/session", (req, res) => {
+    if (req.session.userId) {
+      res.json({
+        authenticated: true,
+        user: { id: req.session.userId, username: req.session.username },
+      });
+    } else {
+      res.json({ authenticated: false });
+    }
+  });
+
+  // Logout endpoint
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        res.status(500).json({ error: "Failed to logout" });
+        return;
+      }
+      res.clearCookie("acestone.sid");
+      res.json({ message: "Logged out successfully" });
+    });
   });
 
   const httpServer = createServer(app);

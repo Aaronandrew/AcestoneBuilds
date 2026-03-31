@@ -13,7 +13,7 @@ import { randomUUID } from "crypto";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@acestonellc.com";
 
 // --- n8n Webhook Integration ---
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL; // e.g. https://your-n8n.com/webhook/xxx
+const N8N_BASE_URL = process.env.N8N_BASE_URL; // e.g. https://n8n.coreorangelabs.com/webhook
 const N8N_WEBHOOK_SECRET = process.env.N8N_WEBHOOK_SECRET || ""; // shared secret for auth
 
 type N8nEvent =
@@ -30,10 +30,19 @@ type N8nEvent =
   | "crm.survey_requested"
   | "crm.closed";
 
+// Maps each CRM event to its dedicated n8n workflow webhook path
+const N8N_WEBHOOK_URLS: Partial<Record<N8nEvent, string>> = N8N_BASE_URL ? {
+  "crm.calendly_sent":    `${N8N_BASE_URL}/acestone-crm`,
+  "crm.estimate_sent":    `${N8N_BASE_URL}/acestone-estimate`,
+  "crm.contract_sent":    `${N8N_BASE_URL}/acestone-contract`,
+  "crm.survey_requested": `${N8N_BASE_URL}/acestone-survey`,
+} : {};
+
 async function fireN8nWebhook(event: N8nEvent, payload: Record<string, any>) {
-  if (!N8N_WEBHOOK_URL) return;
+  const url = N8N_WEBHOOK_URLS[event];
+  if (!url) return;
   try {
-    const res = await fetch(N8N_WEBHOOK_URL, {
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

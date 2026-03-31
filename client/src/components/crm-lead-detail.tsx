@@ -9,11 +9,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Calendar, Phone, Mail, CheckCircle, Clock,
   Camera, FileText, Star, ChevronRight, MessageSquare,
-  Hammer, ClipboardCheck, User, MapPin, ImageIcon, ExternalLink,
+  Hammer, ClipboardCheck, User, MapPin, ImageIcon, ExternalLink, RefreshCw,
 } from "lucide-react";
 import { formatCurrency, JOB_TYPE_LABELS } from "@/lib/pricing";
 import {
@@ -67,6 +71,7 @@ export function CrmLeadDetail({ lead, open, onOpenChange, onCrmUpdate }: CrmLead
   const [completionNotes, setCompletionNotes] = useState(crm.completionNotes || "");
   const [surveyRating, setSurveyRating] = useState(crm.surveyRating || 0);
   const [surveyFeedback, setSurveyFeedback] = useState(crm.surveyFeedback || "");
+  const [resendConfirm, setResendConfirm] = useState<string | null>(null);
 
   // Sync local state when lead changes
   useEffect(() => {
@@ -214,6 +219,40 @@ export function CrmLeadDetail({ lead, open, onOpenChange, onCrmUpdate }: CrmLead
     );
   };
 
+  const handleResend = (stage: string) => {
+    switch (stage) {
+      case "calendly_sent":
+        save(
+          { crmStatus: "calendly_sent", calendlyLink, calendlySentAt: new Date().toISOString() },
+          `Calendly link resent to ${lead.email}`,
+          "Calendly link resent"
+        );
+        break;
+      case "estimate_sent":
+        save(
+          { crmStatus: "estimate_sent", detailedEstimate, estimateSentAt: new Date().toISOString() },
+          `Estimate resent to ${lead.email}`,
+          "Estimate resent"
+        );
+        break;
+      case "contract_sent":
+        save(
+          { crmStatus: "contract_sent", contractAmount, contractDepositPercent, contractNotes, contractSentAt: new Date().toISOString() },
+          `Contract resent to ${lead.email}`,
+          "Contract resent"
+        );
+        break;
+      case "pending_survey":
+        save(
+          { crmStatus: "pending_survey" },
+          `Survey resent to ${lead.email}`,
+          "Survey resent"
+        );
+        break;
+    }
+    setResendConfirm(null);
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
@@ -314,9 +353,14 @@ export function CrmLeadDetail({ lead, open, onOpenChange, onCrmUpdate }: CrmLead
                       className="mt-1"
                     />
                   </div>
-                  <Button onClick={handleBookMeeting} size="sm">
-                    <Calendar className="mr-2 h-3 w-3" /> Mark Meeting Booked
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button onClick={handleBookMeeting} size="sm">
+                      <Calendar className="mr-2 h-3 w-3" /> Mark Meeting Booked
+                    </Button>
+                    <Button onClick={() => setResendConfirm("calendly_sent")} size="sm" variant="outline">
+                      <RefreshCw className="mr-2 h-3 w-3" /> Resend Email
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -408,9 +452,14 @@ export function CrmLeadDetail({ lead, open, onOpenChange, onCrmUpdate }: CrmLead
                     <Label htmlFor="scope" className="text-xs">Scope of Work / Terms</Label>
                     <Textarea id="scope" value={contractNotes} onChange={(e) => setContractNotes(e.target.value)} placeholder="Materials, labor breakdown, timeline, payment terms..." rows={3} className="mt-1 resize-none" />
                   </div>
-                  <Button onClick={handleSendContract} size="sm">
-                    <FileText className="mr-2 h-3 w-3" /> Send Contract
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button onClick={handleSendContract} size="sm">
+                      <FileText className="mr-2 h-3 w-3" /> Send Contract
+                    </Button>
+                    <Button onClick={() => setResendConfirm("estimate_sent")} size="sm" variant="outline">
+                      <RefreshCw className="mr-2 h-3 w-3" /> Resend Estimate
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -432,9 +481,14 @@ export function CrmLeadDetail({ lead, open, onOpenChange, onCrmUpdate }: CrmLead
                       <Input id="end-date" type="date" value={jobEndDate} onChange={(e) => setJobEndDate(e.target.value)} className="mt-1" />
                     </div>
                   </div>
-                  <Button onClick={handleContractSigned} size="sm">
-                    <CheckCircle className="mr-2 h-3 w-3" /> Mark Contract Signed
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button onClick={handleContractSigned} size="sm">
+                      <CheckCircle className="mr-2 h-3 w-3" /> Mark Contract Signed
+                    </Button>
+                    <Button onClick={() => setResendConfirm("contract_sent")} size="sm" variant="outline">
+                      <RefreshCw className="mr-2 h-3 w-3" /> Resend Contract
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -570,9 +624,14 @@ export function CrmLeadDetail({ lead, open, onOpenChange, onCrmUpdate }: CrmLead
                       className="mt-1 resize-none"
                     />
                   </div>
-                  <Button onClick={handleSubmitSurvey} size="sm" disabled={surveyRating === 0}>
-                    <CheckCircle className="mr-2 h-3 w-3" /> Close Job
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button onClick={handleSubmitSurvey} size="sm" disabled={surveyRating === 0}>
+                      <CheckCircle className="mr-2 h-3 w-3" /> Close Job
+                    </Button>
+                    <Button onClick={() => setResendConfirm("pending_survey")} size="sm" variant="outline">
+                      <RefreshCw className="mr-2 h-3 w-3" /> Resend Survey
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -663,6 +722,23 @@ export function CrmLeadDetail({ lead, open, onOpenChange, onCrmUpdate }: CrmLead
           </div>
         </div>
       </SheetContent>
+
+      <AlertDialog open={resendConfirm !== null} onOpenChange={(open) => { if (!open) setResendConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Resend Email?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This email has already been sent. Do you want to send it again?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => resendConfirm && handleResend(resendConfirm)}>
+              Yes, Resend
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }

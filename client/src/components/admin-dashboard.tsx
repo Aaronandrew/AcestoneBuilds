@@ -469,15 +469,6 @@ export function AdminDashboard({ onLogout }: AdminDashboardProps) {
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-green-600 hover:text-green-800"
-                              title={`Call ${formatPhone(lead.phone)}`}
-                              onClick={() => handleCallPhone(lead.phone)}
-                            >
-                              <Phone className="h-4 w-4" />
-                            </Button>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button

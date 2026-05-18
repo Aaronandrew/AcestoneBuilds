@@ -16,7 +16,7 @@ import {
   SESClient
 } from "@aws-sdk/client-ses";
 import { randomUUID } from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import type { IStorage } from "./storage";
 import type { Lead, InsertLead, User, InsertUser, CrmData } from "@shared/schema";
 

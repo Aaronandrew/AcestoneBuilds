@@ -1,6 +1,6 @@
 import { type Lead, type InsertLead, type User, type InsertUser, type CrmData } from "@shared/schema";
 import { randomUUID } from "crypto";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 const BCRYPT_ROUNDS = 12;
 
@@ -142,7 +142,7 @@ export const storage = new MemStorage();
 // AWS Storage (conditional based on environment)
 let awsStorage: any = null;
 export async function getStorage() {
-  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+  if (process.env.DYNAMODB_LEADS_TABLE) {
     if (!awsStorage) {
       const { AWSStorage } = await import('./aws-storage');
       awsStorage = new AWSStorage();

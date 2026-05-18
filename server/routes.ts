@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { getStorage } from "./storage";
 import { insertLeadSchema, type Lead } from "@shared/schema";
 import { z } from "zod";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 // Augment express-session with our user data
 declare module "express-session" {

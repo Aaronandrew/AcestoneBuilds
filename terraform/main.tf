@@ -274,6 +274,141 @@ resource "aws_iam_role_policy" "app_policy" {
 }
 
 # ============================================================
+# Lambda — Express Server
+# ============================================================
+
+resource "aws_iam_role" "lambda_role" {
+  name = "acestone-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+    }]
+  })
+
+  tags = { Name = "acestone-lambda-role" }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_basic" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "lambda_app" {
+  name = "acestone-lambda-app-policy"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DynamoDBAccess"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:DescribeTable"
+        ]
+        Resource = [
+          aws_dynamodb_table.leads.arn,
+          "${aws_dynamodb_table.leads.arn}/index/*",
+          aws_dynamodb_table.users.arn,
+          "${aws_dynamodb_table.users.arn}/index/*"
+        ]
+      },
+      {
+        Sid      = "SESAccess"
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+        Resource = "*"
+      },
+      {
+        Sid    = "S3Access"
+        Effect = "Allow"
+        Action = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket"]
+        Resource = [
+          aws_s3_bucket.uploads.arn,
+          "${aws_s3_bucket.uploads.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_lambda_function" "server" {
+  function_name = "acestone-server"
+  filename      = "${path.module}/../dist/lambda.zip"
+  handler       = "index.handler"
+  runtime       = "nodejs22.x"
+  role          = aws_iam_role.lambda_role.arn
+  timeout       = 30
+  memory_size   = 512
+
+  source_code_hash = filebase64sha256("${path.module}/../dist/lambda.zip")
+
+  environment {
+    variables = {
+      NODE_ENV             = "production"
+      DYNAMODB_LEADS_TABLE = var.dynamodb_leads_table
+      DYNAMODB_USERS_TABLE = var.dynamodb_users_table
+      S3_BUCKET_NAME       = var.s3_bucket_name
+      SES_FROM_EMAIL       = var.ses_from_email
+      ADMIN_EMAIL          = var.admin_email
+    }
+  }
+
+  tags = { Name = "acestone-server" }
+}
+
+# ============================================================
+# API Gateway v2 (HTTP API) — Routes traffic to Lambda
+# ============================================================
+
+resource "aws_apigatewayv2_api" "server" {
+  name          = "acestone-api"
+  protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_origins = ["*"]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    allow_headers = ["Content-Type", "Authorization", "X-Requested-With"]
+    max_age       = 3600
+  }
+
+  tags = { Name = "acestone-api" }
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.server.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_apigatewayv2_integration" "lambda" {
+  api_id                 = aws_apigatewayv2_api.server.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.server.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "proxy" {
+  api_id    = aws_apigatewayv2_api.server.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_lambda_permission" "apigw" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.server.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.server.execution_arn}/*/*"
+}
+
+# ============================================================
 # Amplify — Hosting & CI/CD
 # ============================================================
 # NOTE: Amplify resources commented out due to GitHub webhook permission issues.

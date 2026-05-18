@@ -57,6 +57,11 @@ output "iam_role_arn" {
   value       = aws_iam_role.app_role.arn
 }
 
+output "api_gateway_url" {
+  description = "API Gateway URL — set this as VITE_API_URL in Amplify Console"
+  value       = aws_apigatewayv2_stage.default.invoke_url
+}
+
 # output "amplify_app_id" {
 #   description = "Amplify application ID"
 #   value       = aws_amplify_app.acestone.id

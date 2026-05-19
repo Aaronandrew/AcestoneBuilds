@@ -8,6 +8,11 @@ export function resolveUrl(url: string): string {
   return url.startsWith("/") ? `${API_BASE}${url}` : url;
 }
 
+export function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem("acestone_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -22,7 +27,10 @@ export async function apiRequest(
 ): Promise<Response> {
   const res = await fetch(resolveUrl(url), {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers: {
+      ...getAuthHeaders(),
+      ...(data ? { "Content-Type": "application/json" } : {}),
+    },
     body: data ? JSON.stringify(data) : undefined,
   });
 
@@ -36,7 +44,9 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(resolveUrl(queryKey.join("/") as string), {});
+    const res = await fetch(resolveUrl(queryKey.join("/") as string), {
+      headers: getAuthHeaders(),
+    });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { HardHat, Lock, Loader2 } from "lucide-react";
-import { apiRequest, resolveUrl } from "@/lib/queryClient";
+import { apiRequest, resolveUrl, getAuthHeaders } from "@/lib/queryClient";
 
 export default function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -15,14 +15,12 @@ export default function Admin() {
   const [password, setPassword] = useState("");
   const { toast } = useToast();
 
-  // Check existing session on page load
+  // Check stored JWT on page load
   useEffect(() => {
-    fetch(resolveUrl("/api/auth/session"))
+    fetch(resolveUrl("/api/auth/session"), { headers: getAuthHeaders() })
       .then((res) => res.json())
       .then((data) => {
-        if (data.authenticated) {
-          setIsAuthenticated(true);
-        }
+        if (data.authenticated) setIsAuthenticated(true);
       })
       .catch(() => {})
       .finally(() => setIsCheckingSession(false));
@@ -33,7 +31,8 @@ export default function Admin() {
       const res = await apiRequest("POST", "/api/auth/login", credentials);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      if (data.token) localStorage.setItem("acestone_token", data.token);
       setIsAuthenticated(true);
       toast({
         title: "Login Successful",
@@ -55,11 +54,7 @@ export default function Admin() {
   };
 
   const handleLogout = async () => {
-    try {
-      await apiRequest("POST", "/api/auth/logout");
-    } catch {
-      // logout is best-effort
-    }
+    localStorage.removeItem("acestone_token");
     setIsAuthenticated(false);
     setPassword("");
   };

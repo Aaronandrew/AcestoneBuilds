@@ -4,21 +4,22 @@ import { getStorage } from "./storage";
 import { insertLeadSchema, type Lead } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
-// Augment express-session with our user data
-declare module "express-session" {
-  interface SessionData {
-    userId: string;
-    username: string;
-  }
-}
+const JWT_SECRET = process.env.SESSION_SECRET || "acestone-dev-secret-change-in-prod";
 
-// Auth middleware — protects admin-only routes
+// Auth middleware — validates JWT from Authorization header
 function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (req.session.userId) {
-    next();
-  } else {
+  const token = req.headers.authorization?.replace("Bearer ", "");
+  if (!token) {
     res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  try {
+    (req as any).user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid or expired token" });
   }
 }
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
@@ -942,38 +943,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return;
       }
 
-      // Set session
-      req.session.userId = user.id;
-      req.session.username = user.username;
+      const token = jwt.sign(
+        { id: user.id, username: user.username },
+        JWT_SECRET,
+        { expiresIn: "24h" }
+      );
 
-      res.json({ message: "Authentication successful", user: { id: user.id, username: user.username } });
+      res.json({ message: "Authentication successful", token, user: { id: user.id, username: user.username } });
     } catch (error) {
       res.status(500).json({ error: "Authentication failed" });
     }
   });
 
-  // Session check endpoint
+  // Session check endpoint — validates JWT from Authorization header
   app.get("/api/auth/session", (req, res) => {
-    if (req.session.userId) {
-      res.json({
-        authenticated: true,
-        user: { id: req.session.userId, username: req.session.username },
-      });
-    } else {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) { res.json({ authenticated: false }); return; }
+    try {
+      const user = jwt.verify(token, JWT_SECRET) as any;
+      res.json({ authenticated: true, user: { id: user.id, username: user.username } });
+    } catch {
       res.json({ authenticated: false });
     }
   });
 
-  // Logout endpoint
+  // Logout endpoint — stateless JWT, client just discards token
   app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        res.status(500).json({ error: "Failed to logout" });
-        return;
-      }
-      res.clearCookie("acestone.sid");
-      res.json({ message: "Logged out successfully" });
-    });
+    res.json({ message: "Logged out successfully" });
   });
 
   const httpServer = createServer(app);

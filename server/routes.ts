@@ -87,14 +87,7 @@ function getS3Client(): S3Client | null {
     return null;
   }
   if (!s3Client) {
-    const config: Record<string, any> = { region: process.env.AWS_REGION || "us-east-1" };
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-      config.credentials = {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      };
-    }
-    s3Client = new S3Client(config);
+    s3Client = new S3Client({ region: process.env.AWS_REGION || "us-east-1" });
   }
   return s3Client;
 }
@@ -105,14 +98,7 @@ function getSesClient(): SESClient | null {
     return null;
   }
   if (!sesClient) {
-    const config: Record<string, any> = { region: process.env.AWS_REGION || "us-east-1" };
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-      config.credentials = {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      };
-    }
-    sesClient = new SESClient(config);
+    sesClient = new SESClient({ region: process.env.AWS_REGION || "us-east-1" });
   }
   return sesClient;
 }
@@ -937,7 +923,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Legacy plaintext — compare and migrate to bcrypt
         passwordValid = user.password === password;
         if (passwordValid) {
-          const { hash } = await import("bcrypt");
+          const { hash } = await import("bcryptjs");
           const hashed = await hash(password, 12);
           const storage = await getStorage();
           // Update password in-place if storage supports it

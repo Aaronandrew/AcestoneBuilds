@@ -9,7 +9,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build:client": "vite build",
     "build:server": "esbuild server/index.ts --platform=node --bundle --format=esm --outfile=dist/server/index.js",
-    "build:lambda": "esbuild server/lambda.ts --platform=node --bundle --format=esm --outfile=dist/lambda/index.mjs",
+    "build:lambda": "esbuild server/lambda.ts --platform=node --bundle --format=cjs --outfile=dist/lambda/index.js && echo '{\"type\":\"commonjs\"}' > dist/lambda/package.json",
     "package:lambda": "npm run build:lambda && cd dist/lambda && zip -r ../lambda.zip . && cd ../..",
     "build": "npm run build:client && npm run build:server",
     "start": "node dist/server/index.js"

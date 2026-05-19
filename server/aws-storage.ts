@@ -33,21 +33,10 @@ export class AWSStorage implements IStorage {
   private fromEmail: string;
 
   constructor() {
-    const region = process.env.AWS_REGION || "us-east-1";
-
-    // Only set credentials if running locally (keys exist in .env)
-    const hasLocalCreds =
-      process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY;
-
-    const clientConfig = hasLocalCreds
-      ? {
-          region,
-          credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-          },
-        }
-      : { region }; // In Amplify, IAM role provides creds
+    // Let the AWS SDK resolve credentials automatically:
+    // - Lambda: uses IAM execution role (with session token) automatically
+    // - Local dev: uses AWS_ACCESS_KEY_ID/SECRET from .env or ~/.aws/credentials
+    const clientConfig = { region: process.env.AWS_REGION || "us-east-1" };
 
     // DynamoDB
     this.dbClient = DynamoDBDocumentClient.from(new DynamoDBClient(clientConfig));

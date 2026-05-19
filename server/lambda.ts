@@ -1,4 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
+import session from "express-session";
+import { randomUUID } from "crypto";
 import serverless from "serverless-http";
 import { registerRoutes } from "./routes";
 
@@ -11,6 +13,21 @@ async function getHandler() {
   const app = express();
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: false, limit: "10mb" }));
+
+  app.use(
+    session({
+      secret: process.env.SESSION_SECRET || randomUUID(),
+      resave: false,
+      saveUninitialized: false,
+      name: "acestone.sid",
+      cookie: {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none", // cross-origin: Amplify domain → API Gateway
+        maxAge: 24 * 60 * 60 * 1000,
+      },
+    })
+  );
 
   await registerRoutes(app);
 

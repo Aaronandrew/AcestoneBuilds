@@ -4,7 +4,7 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 // VITE_API_URL is set in Amplify Console env vars.
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
-function resolveUrl(url: string): string {
+export function resolveUrl(url: string): string {
   return url.startsWith("/") ? `${API_BASE}${url}` : url;
 }
 

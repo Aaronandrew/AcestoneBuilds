@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { resolveUrl } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -90,10 +91,9 @@ export function CustomerForm() {
           const formData = new FormData();
           formData.append('file', file);
           
-          const uploadRes = await fetch("/api/upload", {
+          const uploadRes = await fetch(resolveUrl("/api/upload"), {
             method: "POST",
             body: formData,
-            credentials: "include",
           });
           if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadRes.statusText}`);
           const { url } = await uploadRes.json();

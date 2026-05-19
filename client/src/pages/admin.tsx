@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { HardHat, Lock, Loader2 } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, resolveUrl } from "@/lib/queryClient";
 
 export default function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -17,7 +17,7 @@ export default function Admin() {
 
   // Check existing session on page load
   useEffect(() => {
-    fetch("/api/auth/session", { credentials: "include" })
+    fetch(resolveUrl("/api/auth/session"))
       .then((res) => res.json())
       .then((data) => {
         if (data.authenticated) {
